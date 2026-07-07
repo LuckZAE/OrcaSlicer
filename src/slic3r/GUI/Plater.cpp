@@ -9,6 +9,7 @@
 #include "libslic3r/MixedFilament.hpp"
 #include "libslic3r/filament_mixer.h"
 #include "common_func/common_func.hpp"
+#include "snap_telemetry/telemetry_adapter.hpp"
 
 #include <atomic>
 #include <cstddef>
@@ -11336,6 +11337,15 @@ std::vector<size_t> Plater::priv::load_files(const std::vector<fs::path>& input_
             if (msg.ShowModal() == wxID_YES) {}
         }
     }
+    // SnM: project-open funnel — project loaded successfully
+    if (!obj_idxs.empty()) {
+        std::string ext = !input_files.empty() ? input_files.front().extension().string() : std::string();
+        SNAP_TRACK("project_opened", {
+            {"file_ext", ext},
+            {"file_count", (int64_t)input_files.size()},
+            {"object_count", (int64_t)obj_idxs.size()},
+        });
+    }
     return obj_idxs;
 }
 
@@ -13955,6 +13965,8 @@ void Plater::priv::on_process_completed(SlicingProcessCompletedEvent &evt)
                 //auto strTime = get_works_time(duration_ms);
                 //auto slice_time = BP_SLICE_DURATION_TIME + std::string(":") + strTime;
                 //sentryReportLog(SENTRY_LOG_TRACE, slice_time, BP_SLICE_DURATION);
+
+                SNAP_TRACK("slice_completed", {{"duration_ms", (int64_t)duration_ms}});
 
                 m_slice_start_time    = {};
                 m_slice_timing_active = false; 

@@ -21,6 +21,7 @@
 #include <wx/dir.h>
 
 #define CALI_DEBUG
+#include "snap_telemetry/telemetry_adapter.hpp"
 #define MINUTE_30 1800000    //ms
 #define TIME_OUT  5000       //ms
 
@@ -2741,6 +2742,12 @@ int MachineObject::connect(bool is_anonymous, bool use_openssl)
         password = get_access_code();
     }
     if (m_agent) {
+        // SnM: connection funnel — connect_attempt (device-connect main path)
+        SNAP_TRACK("connect_attempt", {
+            {"connection_type", dev_connection_type},
+            {"is_anonymous", is_anonymous},
+            {"use_ssl", use_openssl},
+        });
         try {
             return m_agent->connect_printer(dev_id, dev_ip, username, password, use_openssl);
         } catch (...) {
@@ -2895,6 +2902,15 @@ int MachineObject::parse_json(std::string payload, bool key_field_only)
     parse_msg_count++;
     std::chrono::system_clock::time_point clock_start = std::chrono::system_clock::now();
     this->set_online_state(true);
+
+    // SnM: connection funnel — connect_success fires once on the first
+    // device push message (parse_msg_count == 1), the true "device online"
+    // signal that makes is_connected() return true.
+    if (parse_msg_count == 1) {
+        SNAP_TRACK("connect_success", {
+            {"connection_type", dev_connection_type},
+        });
+    }
 
     std::chrono::system_clock::time_point curr_time = std::chrono::system_clock::now();
     auto diff1 = std::chrono::duration_cast<std::chrono::microseconds>(curr_time - last_update_time);
@@ -6303,12 +6319,14 @@ void DeviceManager::on_machine_alive(std::string json_str)
 MachineObject* DeviceManager::insert_local_device(const BBLocalMachine& machine, std::string connection_type, std::string bind_state, std::string version, std::string access_code)
 {
     MachineObject* obj;
+    bool is_new_device = false;
     auto           it = localMachineList.find(machine.dev_id);
     if (it != localMachineList.end()) {
         obj = it->second;
     } else {
         obj = new MachineObject(m_agent, machine.dev_name, machine.dev_id, machine.dev_ip);
         localMachineList.insert(std::make_pair(machine.dev_id, obj));
+        is_new_device = true;
     }
     obj->printer_type = MachineObject::parse_printer_type(machine.printer_type);
     obj->dev_connection_type = connection_type;
@@ -6321,6 +6339,12 @@ MachineObject* DeviceManager::insert_local_device(const BBLocalMachine& machine,
     obj->set_user_access_code(access_code, false);
 
     update_local_machine(*obj);
+
+    // Only fire on first discovery — insert_local_device is also called on
+    // every SSDP re-advertisement of an already-known device.
+    if (is_new_device) {
+        SNAP_TRACK("device_connect", {{"net_type", connection_type}});
+    }
 
     return obj;
 }

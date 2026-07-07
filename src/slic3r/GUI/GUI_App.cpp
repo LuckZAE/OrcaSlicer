@@ -8,6 +8,7 @@
 #include "slic3r/GUI/TaskManager.hpp"
 #include "format.hpp"
 #include "common_func/common_func.hpp"
+#include "snap_telemetry/telemetry_adapter.hpp"
 #include "Downloader.hpp"
 
 #include "slic3r/GUI/WebUrlDialog.hpp"
@@ -2517,6 +2518,8 @@ int GUI_App::OnExit()
         BOOST_LOG_TRIVIAL(error) << "Failed to clean up encrypt bbl network log file";
     }
 
+    // SnM: drain and shut down telemetry before process exit
+    Slic3r::GUI::telemetry_shutdown();
     return wxApp::OnExit();
 }
 
@@ -2551,6 +2554,9 @@ bool GUI_App::on_init_inner()
 #endif
 
     ::Label::initSysFont();
+
+    // SnM: init first-party telemetry (consent-gated, non-blocking)
+    Slic3r::GUI::telemetry_init();
 
     // Set initialization of image handlers before any UI actions - See GH issue #7469
     wxInitAllImageHandlers();
@@ -4134,8 +4140,14 @@ void GUI_App::load_project(wxWindow *parent, wxString& input_file) const
         from_u8(app_config->get_last_dir()), "",
         file_wildcards(FT_PROJECT), wxFD_OPEN | wxFD_FILE_MUST_EXIST);
 
-    if (dialog.ShowModal() == wxID_OK)
+    if (dialog.ShowModal() == wxID_OK) {
         input_file = dialog.GetPath();
+        // SnM: project-open funnel — user picked a project file to open
+        std::string path(input_file.ToUTF8().data());
+        auto dot = path.find_last_of('.');
+        std::string ext = dot != std::string::npos ? path.substr(dot) : std::string();
+        SNAP_TRACK("project_open", {{"file_ext", ext}});
+    }
 }
 
 void GUI_App::import_model(wxWindow *parent, wxArrayString& input_files) const

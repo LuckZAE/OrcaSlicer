@@ -695,6 +695,9 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/GeneratedConfig.hpp.in
 
 add_library(libslic3r_gui STATIC ${SLIC3R_GUI_SOURCES})
 target_include_directories(libslic3r_gui PRIVATE Utils ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/..)
+# Snapmaker telemetry SDK include path (NOMINMAX is handled per-TU in the
+# adapter header, since some OrcaSlicer TUs rely on windows.h min/max macros)
+target_include_directories(libslic3r_gui PRIVATE ${CMAKE_SOURCE_DIR}/../metrics/include)
 target_link_libraries(libslic3r_gui paho-mqttpp3-static)
 
 target_include_directories(libslic3r_gui PRIVATE ${PAHO_MQTT_CPP_PATH}/include)

@@ -115,10 +115,10 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/dev-utils/platform/msw/Snapmaker_Orca
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/dev-utils/platform/msw/Snapmaker_Orca.manifest.in ${CMAKE_CURRENT_BINARY_DIR}/Snapmaker_Orca.manifest @ONLY)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/dev-utils/platform/osx/Info.plist.in ${CMAKE_CURRENT_BINARY_DIR}/Info.plist @ONLY)
 if (WIN32)
-    add_library(Snapmaker_Orca SHARED Snapmaker_Orca.cpp Snapmaker_Orca.hpp dev-utils/BaseException.cpp dev-utils/BaseException.h dev-utils/StackWalker.cpp dev-utils/StackWalker.h sentry_wrapper/SentryWrapper.hpp sentry_wrapper/SentryWrapper.cpp bury_cfg/bury_point.hpp bury_cfg/bury_point.cpp common_func/common_func.hpp common_func/common_func.cpp)
+    add_library(Snapmaker_Orca SHARED Snapmaker_Orca.cpp Snapmaker_Orca.hpp dev-utils/BaseException.cpp dev-utils/BaseException.h dev-utils/StackWalker.cpp dev-utils/StackWalker.h sentry_wrapper/SentryWrapper.hpp sentry_wrapper/SentryWrapper.cpp bury_cfg/bury_point.hpp bury_cfg/bury_point.cpp common_func/common_func.hpp common_func/common_func.cpp snap_telemetry/telemetry_adapter.cpp snap_telemetry/telemetry_adapter.hpp)
     target_compile_definitions(Snapmaker_Orca PRIVATE BURY_EXPORTS)
 else ()
-    add_executable(Snapmaker_Orca Snapmaker_Orca.cpp Snapmaker_Orca.hpp sentry_wrapper/SentryWrapper.hpp sentry_wrapper/SentryWrapper.cpp bury_cfg/bury_point.hpp bury_cfg/bury_point.cpp common_func/common_func.hpp common_func/common_func.cpp)
+    add_executable(Snapmaker_Orca Snapmaker_Orca.cpp Snapmaker_Orca.hpp sentry_wrapper/SentryWrapper.hpp sentry_wrapper/SentryWrapper.cpp bury_cfg/bury_point.hpp bury_cfg/bury_point.cpp common_func/common_func.hpp common_func/common_func.cpp snap_telemetry/telemetry_adapter.cpp snap_telemetry/telemetry_adapter.hpp)
 endif ()
 
 if (MINGW)
@@ -134,6 +134,18 @@ if (NOT WIN32 AND NOT APPLE)
 endif ()
 
 target_link_libraries(Snapmaker_Orca libslic3r cereal::cereal)
+# Snapmaker telemetry SDK — static lib
+if(MSVC)
+  target_link_libraries(Snapmaker_Orca
+    optimized "${CMAKE_SOURCE_DIR}/../metrics/build_msvc/Release/snap_telemetry.lib"
+    debug     "${CMAKE_SOURCE_DIR}/../metrics/build_msvc/Debug/snap_telemetry.lib"
+  )
+else()
+  target_link_libraries(Snapmaker_Orca snap_telemetry)
+endif()
+target_include_directories(Snapmaker_Orca PRIVATE ${CMAKE_SOURCE_DIR}/../metrics/include)
+# libcurl is already linked transitively through libslic3r, but ensure it's present
+target_link_libraries(Snapmaker_Orca ${CURL_LIBRARIES})
 # target_include_directories(OrcaSlicer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/slic3r)
 if (APPLE)
 #    add_compile_options(-stdlib=libc++)
