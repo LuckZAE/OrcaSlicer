@@ -1,0 +1,22 @@
+# Build / IDE
+build/
+build_msvc/
+out/
+cmake-build-*/
+*.o
+*.a
+*.so
+*.dll
+
+# Agent / local tooling
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Telemetry prototype runtime output
+telemetry.jsonl
+*.spool
+demo-data/
+mock_output.log

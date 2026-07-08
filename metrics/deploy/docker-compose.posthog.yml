@@ -1,0 +1,105 @@
+# 精简真 PostHog 自托管（postgres + redis + clickhouse + redpanda + posthog），本地端到端验证用。
+# 用 2024-06-29 build（commit 0b22cc401624）：/batch capture 在 django web，nginx-unit serve。
+# Redpanda 替代 Kafka（Kafka-API 兼容，无 Zookeeper，单容器），PostHog producer 连 kafka:9092。
+# 生产部署以 PostHog 官方 compose 为准。
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: ph_db
+    environment:
+      POSTGRES_DB: posthog
+      POSTGRES_USER: posthog
+      POSTGRES_PASSWORD: posthog
+    volumes: [ "pgdata:/var/lib/postgresql/data" ]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "posthog"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: ph_redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  clickhouse:
+    # 2024-06 PostHog pin ClickHouse 23.12.5.81；24.x 收紧了隐式类型转换（Code 70），必须用匹配版本。
+    image: clickhouse/clickhouse-server:23.12.5.81-alpine
+    container_name: ph_clickhouse
+    environment:
+      CLICKHOUSE_DB: posthog
+      CLICKHOUSE_SKIP_USER_SETUP: "1"
+      KAFKA_HOSTS: "kafka:9092"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - "clickhousedata:/var/lib/clickhouse"
+      - "./clickhouse-clusters.xml:/etc/clickhouse-server/config.d/clusters.xml:ro"
+      - "./clickhouse-users.xml:/etc/clickhouse-server/users.d/default-access.xml:ro"
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 15s
+
+  kafka:
+    # Redpanda：Kafka-API 兼容 Broker，单容器无 Zookeeper，dev-container 模式开 auto-create-topics。
+    # PostHog producer 连 kafka:9092 通过 Kafka API 发送事件，与 Apache Kafka 完全兼容。
+    image: docker.1ms.run/redpandadata/redpanda:latest
+    container_name: ph_kafka
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://kafka:9092,external://localhost:19092
+      - --mode dev-container
+      - --set redpanda.auto_create_topics_enabled=true
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health --watch 2>/dev/null | grep -q 'Healthy' || rpk topic list --brokers localhost:9092 >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+
+  posthog:
+    # 2024-06-29 build（commit 0b22cc401624）：docker.io 现成镜像，/batch capture 仍在 django web
+    image: posthog/posthog:0b22cc401624bedab251a98f8bc86608ca9f59e5
+    container_name: ph_posthog
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      clickhouse: { condition: service_healthy }
+      kafka: { condition: service_started }
+    ports: [ "8000:8000" ]
+    environment:
+      DATABASE_URL: postgres://posthog:posthog@db:5432/posthog
+      REDIS_URL: redis://redis:6379
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "9000"
+      CLICKHOUSE_SECURE: "False"
+      CLICKHOUSE_DATABASE: posthog
+      SECRET_KEY: local-dev-only-not-a-real-secret-9f2a7b1c4e8d
+      SITE_URL: http://localhost:8000
+      DISABLE_SECURE_SSL_REDIRECT: "1"
+      SECURE_COOKIES: "0"
+      DEPLOYMENT: self-hosted
+      POSTHOG_SKIP_MIGRATION_CHECKS: "1"
+      KAFKA_HOSTS: kafka:9092
+      KAFKA_URL: kafka://kafka:9092
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\"" ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+volumes:
+  pgdata: {}
+  clickhousedata: {}

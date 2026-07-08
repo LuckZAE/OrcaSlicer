@@ -1,0 +1,85 @@
+<clickhouse>    <!-- 内置 Keeper（PostHog replicated 表引擎需要，即使单节点）-->
+    <keeper_server>
+        <tcp_port>9181</tcp_port>
+        <server_id>1</server_id>
+        <log_storage_path>/var/lib/clickhouse/coordination/log</log_storage_path>
+        <snapshot_storage_path>/var/lib/clickhouse/coordination/snapshots</snapshot_storage_path>
+        <raft_configuration>
+            <server>
+                <id>1</id>
+                <hostname>localhost</hostname>
+                <port>9234</port>
+            </server>
+        </raft_configuration>
+    </keeper_server>
+
+    <!-- PostHog 连接 Keeper 的地址（本机内置 keeper）-->
+    <zookeeper>
+        <node>
+            <host>localhost</host>
+            <port>9181</port>
+        </node>
+    </zookeeper>
+
+    <!-- ReplicatedMergeTree 引擎里 {replica}/{shard} 宏 + PostHog cluster.py 要求的宏 -->
+    <macros>
+        <shard>shard1</shard>
+        <replica>replica1</replica>
+        <cluster>posthog</cluster>
+        <hostClusterType>cluster_node</hostClusterType>
+        <hostClusterRole>replica</hostClusterRole>
+    </macros>
+
+    <!-- PostHog 要求的 cluster 定义（全部指向单节点 localhost:9000）-->
+    <remote_servers>
+        <posthog>
+            <shard><replica><host>clickhouse</host><port>9000</port></replica></shard>
+        </posthog>
+        <posthog_migrations>
+            <shard><replica><host>clickhouse</host><port>9000</port></replica></shard>
+        </posthog_migrations>
+        <posthog_single_shard>
+            <shard><replica><host>clickhouse</host><port>9000</port></replica></shard>
+        </posthog_single_shard>
+        <posthog_writable>
+            <shard><replica><host>clickhouse</host><port>9000</port></replica></shard>
+        </posthog_writable>
+        <posthog_primary_replica>
+            <shard><replica><host>clickhouse</host><port>9000</port></replica></shard>
+        </posthog_primary_replica>
+        <aux>
+            <shard><replica><host>clickhouse</host><port>9000</port></replica></shard>
+        </aux>
+        <ai_events>
+            <shard><replica><host>clickhouse</host><port>9000</port></replica></shard>
+        </ai_events>
+        <ops>
+            <shard><replica><host>clickhouse</host><port>9000</port></replica></shard>
+        </ops>
+        <sessions>
+            <shard><replica><host>clickhouse</host><port>9000</port></replica></shard>
+        </sessions>
+    </remote_servers>
+
+    <!-- Kafka named collections（精简版没有真正的 Kafka broker，但 PostHog migration 需要这些引用存在）-->
+    <named_collections>
+        <msk_cluster>
+            <kafka_broker_list>localhost:9092</kafka_broker_list>
+        </msk_cluster>
+        <warpstream_ingestion>
+            <kafka_broker_list>localhost:9092</kafka_broker_list>
+        </warpstream_ingestion>
+        <warpstream_calculated_events>
+            <kafka_broker_list>localhost:9092</kafka_broker_list>
+        </warpstream_calculated_events>
+        <warpstream_replay>
+            <kafka_broker_list>localhost:9092</kafka_broker_list>
+        </warpstream_replay>
+        <warpstream_shared>
+            <kafka_broker_list>localhost:9092</kafka_broker_list>
+        </warpstream_shared>
+        <warpstream_cyclotron>
+            <kafka_broker_list>localhost:9092</kafka_broker_list>
+        </warpstream_cyclotron>
+    </named_collections>
+</clickhouse>
