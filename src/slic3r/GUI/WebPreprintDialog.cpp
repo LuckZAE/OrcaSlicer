@@ -154,6 +154,11 @@ void WebPreprintDialog::RunScript(const wxString &javascript)
     WebView::RunScript(m_browser, javascript);
 }
 
+void WebPreprintDialog::SendWcpMessage(const std::string& message)
+{
+    SSWCP::send_message_auto(message, m_browser);
+}
+
 void WebPreprintDialog::OnNavigationRequest(wxWebViewEvent &evt)
 {
     evt.Skip();
@@ -214,4 +219,4 @@ void WebPreprintDialog::OnClose(wxCloseEvent& evt)
     }
 }
 
-}} // namespace Slic3r::GUI 
+}} // namespace Slic3r::GUI

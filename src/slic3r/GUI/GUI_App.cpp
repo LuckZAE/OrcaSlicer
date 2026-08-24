@@ -12,6 +12,7 @@
 
 #include "slic3r/GUI/WebUrlDialog.hpp"
 #include "slic3r/GUI/WebPresetDialog.hpp"
+#include "slic3r/GUI/WebPreprintDialog.hpp"
 
 #include "slic3r/GUI/SSWCP.hpp"
 #include "slic3r/GUI/DownloadManager.hpp"
@@ -36,6 +37,7 @@
 #include <cstdlib>
 #include <clocale>
 #include <regex>
+#include <unordered_map>
 #include <thread>
 #include <string_view>
 #include <boost/algorithm/string/predicate.hpp>
@@ -1234,6 +1236,52 @@ void GUI_App::post_init()
 #endif //WIN32
 }
 
+namespace {
+
+void send_local_file_progress(const FileProgress& progress)
+{
+    static std::mutex last_percent_mutex;
+    static std::unordered_map<std::string, int> last_percent;
+
+    const bool is_failed  = progress.failed;
+    const bool is_complete = !is_failed && progress.bytes_sent >= progress.total_bytes;
+    const int next_percent = progress.total_bytes == 0 ?
+                                 100 :
+                                 static_cast<int>(progress.bytes_sent * 100 / progress.total_bytes);
+
+    bool should_send = false;
+    {
+        std::lock_guard<std::mutex> lock(last_percent_mutex);
+        auto last = last_percent.try_emplace(progress.url, -1).first;
+        should_send = is_failed || is_complete || next_percent != last->second;
+        if (should_send) last->second = next_percent;
+        if (is_failed || is_complete) last_percent.erase(last);
+    }
+
+    if (!should_send) return;
+
+    json data;
+    data["url"] = progress.url;
+    data["bytes_sent"] = progress.bytes_sent;
+    data["total_bytes"] = progress.total_bytes;
+    data["progress"] = next_percent;
+    data["complete"] = is_complete;
+    data["failed"] = is_failed;
+
+    json event;
+    event["header"]["event_id"] = "sw_LocalFileProgress";
+    event["payload"]["code"] = 200;
+    event["payload"]["message"] = is_failed ? "local file download failed" : "local file download progress";
+    event["payload"]["data"] = data;
+
+    wxGetApp().CallAfter([message = event.dump()]() {
+        auto dialog = dynamic_cast<WebPreprintDialog*>(wxGetApp().get_web_preprint_dialog());
+        if (dialog) dialog->SendWcpMessage(message);
+    });
+}
+
+} // namespace
+
 wxDEFINE_EVENT(EVT_ENTER_FORCE_UPGRADE, wxCommandEvent);
 wxDEFINE_EVENT(EVT_SHOW_NO_NEW_VERSION, wxCommandEvent);
 wxDEFINE_EVENT(EVT_SHOW_DIALOG, wxCommandEvent);
@@ -1270,6 +1318,7 @@ GUI_App::GUI_App()
 
     // test
     m_page_http_server.setPort(PAGE_HTTP_PORT);
+    m_page_http_server.set_file_progress_callback([](const FileProgress& progress) { send_local_file_progress(progress); });
     m_page_http_server.set_request_handler(HttpServer::web_server_handle_request);
     m_page_http_server.start();
     profiler.mark("m_page_http_server.start");

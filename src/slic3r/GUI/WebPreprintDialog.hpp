@@ -16,6 +16,7 @@ public:
     void load_url(wxString &url);
     bool run();
     void RunScript(const wxString &javascript);
+    void SendWcpMessage(const std::string& message);
 
     void reload();
 
@@ -62,4 +63,4 @@ private:
 
 }} // namespace Slic3r::GUI
 
-#endif 
+#endif
