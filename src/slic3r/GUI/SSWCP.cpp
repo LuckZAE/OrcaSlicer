@@ -8,6 +8,7 @@
 #include "nlohmann/json.hpp"
 #include "slic3r/GUI/Tab.hpp"
 #include "libslic3r/Model.hpp"
+#include "libslic3r/SSWCPProtocol.hpp"
 #include "sentry_wrapper/SentryWrapper.hpp"
 #include <algorithm>
 #include <iterator>
@@ -2047,6 +2048,10 @@ void SSWCP_MachineOption_Instance::process()
         sw_SetMachineSubscribeFilter();
     } else if (m_cmd == "sw_StopMachineStateSubscription") {
         sw_UnSubscribeMachineState();
+    } else if (m_cmd == "sw_SubscribeExcludeObject") {
+        sw_SubscribeExcludeObject();
+    } else if (m_cmd == "sw_SkipObject") {
+        sw_SkipObject();
     } else if (m_cmd == "sw_GetPrinterInfo") {
         sw_GetPrintInfo();
     } else if (m_cmd == "sw_GetMachineSystemInfo") {
@@ -2485,6 +2490,77 @@ void SSWCP_MachineOption_Instance::sw_SetMachineSubscribeFilter()
             handle_general_fail();
         }
 
+    }
+}
+
+// Skip-object interface 1: 获取指定对象信息.
+// Sends printer.objects.subscribe with objects {exclude_object: null}. The RPC
+// response carries the initial snapshot (objects / excluded_objects /
+// current_object); later changes are pushed through the status topic via the
+// persistent callback registered by async_subscribe_machine_info. Cancel with
+// sw_StopMachineStateSubscription using the same event_id, exactly like
+// sw_SubscribeMachineState.
+void SSWCP_MachineOption_Instance::sw_SubscribeExcludeObject() {
+    {
+        std::shared_ptr<PrintHost> host = nullptr;
+        wxGetApp().get_connect_host(host);
+
+        if (!host) {
+            m_status = 1;
+            m_msg    = "failure";
+            send_to_js();
+            finish_job();
+            return;
+        }
+
+        auto weak_self = std::weak_ptr<SSWCP_Instance>(shared_from_this());
+        std::string key = m_event_id + std::to_string(int64_t(m_webview));
+        host->async_subscribe_machine_info(key, [weak_self](const json& response) {
+            auto self = weak_self.lock();
+            if (self) {
+                SSWCP_Instance::on_mqtt_status_msg_arrived(self, response);
+            }
+        });
+
+        std::vector<std::pair<std::string, std::vector<std::string>>> targets;
+        targets.push_back({"exclude_object", {}});
+        host->async_set_machine_subscribe_filter(targets, [weak_self](const json& response) {
+            auto self = weak_self.lock();
+            if (self) {
+                // Deliberately not on_mqtt_msg_arrived: that would finish the
+                // instance after the initial snapshot and kill the subscription.
+                SSWCP_Instance::on_mqtt_status_msg_arrived(self, response);
+            }
+        });
+    }
+}
+
+// Skip-object interface 2: 跳过对象指令.
+// Executes "EXCLUDE_OBJECT NAME=<object>" for every requested object through
+// printer.gcode.script (async_send_gcodes).
+void SSWCP_MachineOption_Instance::sw_SkipObject() {
+    {
+        std::vector<std::string> names;
+        if (!SSWCPProtocol::parse_skip_object_names(m_param_data, names)) {
+            handle_general_fail(-1, "param [name] or [names] required");
+            return;
+        }
+
+        std::shared_ptr<PrintHost> host = nullptr;
+        wxGetApp().get_connect_host(host);
+
+        if (!host) {
+            handle_general_fail();
+            return;
+        }
+
+        auto weak_self = std::weak_ptr<SSWCP_Instance>(shared_from_this());
+        host->async_send_gcodes(SSWCPProtocol::build_exclude_object_scripts(names), [weak_self](const json& response) {
+            auto self = weak_self.lock();
+            if (self) {
+                SSWCP_Instance::on_mqtt_msg_arrived(self, response);
+            }
+        });
     }
 }
 void SSWCP_MachineOption_Instance::sw_GetMachineObjects()
@@ -7160,6 +7236,8 @@ std::unordered_set<std::string> SSWCP::m_machine_option_cmd_list = {
     "sw_GetMachineObjects",
     "sw_SetSubscribeFilter",
     "sw_StopMachineStateSubscription",
+    "sw_SubscribeExcludeObject",
+    "sw_SkipObject",
     "sw_GetPrinterInfo",
     "sw_MachinePrintStart",
     "sw_MachinePrintPause",
@@ -7370,7 +7448,9 @@ void SSWCP::stop_subscribe_machine()
 
         // Get all subscription instances to stop
         for (const auto& instance : snapshot) {
-            if (instance.second->getType() == SSWCP_MachineFind_Instance::MACHINE_OPTION && instance.second->m_cmd == "sw_SubscribeMachineState") {
+            if (instance.second->getType() == SSWCP_MachineFind_Instance::MACHINE_OPTION &&
+                (instance.second->m_cmd == "sw_SubscribeMachineState" ||
+                 instance.second->m_cmd == "sw_SubscribeExcludeObject")) {
                 instances_to_stop.push_back(instance.first);
             }
         }

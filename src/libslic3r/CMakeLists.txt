@@ -425,6 +425,8 @@ set(lisbslic3r_sources
     Support/TreeSupportCommon.hpp
     Support/TreeSupport.cpp
     Support/TreeSupport.hpp
+    SSWCPProtocol.cpp
+    SSWCPProtocol.hpp
     SurfaceCollection.cpp
     SurfaceCollection.hpp
     Surface.cpp

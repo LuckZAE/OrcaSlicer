@@ -402,6 +402,9 @@ private:
     void sw_UnSubscribeMachineState();
     void sw_GetMachineObjects();
     void sw_SetMachineSubscribeFilter();
+    // Skip-object (EXCLUDE_OBJECT) interfaces
+    void sw_SubscribeExcludeObject();
+    void sw_SkipObject();
     void sw_GetSystemInfo();
     void sw_MachinePrintStart();
     void sw_MachinePrintPause();
