@@ -225,8 +225,14 @@ class FakeWebView : public wxWebView
 
 wxDEFINE_EVENT(EVT_WEBVIEW_RECREATED, wxCommandEvent);
 
-static std::vector<wxWebView*> g_webviews;
-static std::vector<wxWebView*> g_delay_webviews;
+struct DelayedWebView
+{
+    wxWebView *view;
+    wxString   url;
+};
+
+static std::vector<wxWebView*>     g_webviews;
+static std::vector<DelayedWebView> g_delay_webviews;
 
 class WebViewRef : public wxObjectRefData
 {
@@ -237,6 +243,12 @@ public:
         assert(iter != g_webviews.end());
         if (iter != g_webviews.end())
             g_webviews.erase(iter);
+        for (auto delayed_iter = g_delay_webviews.begin(); delayed_iter != g_delay_webviews.end();) {
+            if (delayed_iter->view == m_webView)
+                delayed_iter = g_delay_webviews.erase(delayed_iter);
+            else
+                ++delayed_iter;
+        }
     }
     wxWebView *m_webView;
 };
@@ -292,7 +304,15 @@ wxWebView* WebView::CreateWebView(wxWindow * parent, wxString const & url)
         webView->RegisterHandler(wxSharedPtr<wxWebViewHandler>(new wxWebViewArchiveHandler("wxfs")));
         webView->RegisterHandler(wxSharedPtr<wxWebViewHandler>(new wxWebViewFSHandler("memory")));
 #endif
+        wxString delayed_url;
+#ifdef __WXMAC__
+        // WKWebView starts loading during Create(), before the delayed handler callback runs.
+        // Keep its initial document blank and navigate only after the handler is installed.
+        delayed_url = url2;
+        webView->Create(parent, wxID_ANY, wxString("about:blank"), wxDefaultPosition, wxDefaultSize, wxBORDER_NONE);
+#else
         webView->Create(parent, wxID_ANY, url2, wxDefaultPosition, wxDefaultSize, wxBORDER_NONE);
+#endif
         webView->SetUserAgent(wxString::Format("SM-Slicer/v%s (%s) Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)", SLIC3R_VERSION,
                                                Slic3r::GUI::wxGetApp().dark_mode() ? "dark" : "light"));
 #endif
@@ -300,25 +320,29 @@ wxWebView* WebView::CreateWebView(wxWindow * parent, wxString const & url)
         WKWebView * wkWebView = (WKWebView *) webView->GetNativeBackend();
         Slic3r::GUI::WKWebView_setTransparentBackground(wkWebView);
 #endif
-        auto addScriptMessageHandler = [] (wxWebView *webView) {
+        auto addScriptMessageHandler = [] (wxWebView *webView, const wxString &url) {
             BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": begin to add script message handler for wx.";
             Slic3r::GUI::wxGetApp().set_adding_script_handler(true);
             if (!webView->AddScriptMessageHandler("wx"))
                 wxLogError("Could not add script message handler");
             Slic3r::GUI::wxGetApp().set_adding_script_handler(false);
             BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": finished add script message handler for wx.";
+#ifdef __WXMAC__
+            if (!url.empty())
+                webView->LoadURL(url);
+#endif
         };
 #ifndef __WIN32__
-        webView->CallAfter([webView, addScriptMessageHandler] {
+        webView->CallAfter([webView, delayed_url, addScriptMessageHandler] {
 #endif
             if (Slic3r::GUI::wxGetApp().is_adding_script_handler()) {
-                g_delay_webviews.push_back(webView);
+                g_delay_webviews.push_back({webView, delayed_url});
             } else {
-                addScriptMessageHandler(webView);
+                addScriptMessageHandler(webView, delayed_url);
                 while (!g_delay_webviews.empty()) {
                     auto views = std::move(g_delay_webviews);
-                    for (auto wv : views)
-                        addScriptMessageHandler(wv);
+                    for (const auto &wv : views)
+                        addScriptMessageHandler(wv.view, wv.url);
                 }
             }
 #ifndef __WIN32__

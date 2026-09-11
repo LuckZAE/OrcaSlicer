@@ -81,6 +81,12 @@ void PrinterWebView::load_url(wxString& url, wxString apikey)
     }
 
     m_browser->Show();
+#ifdef __WXMAC__
+    if (m_browser->GetCurrentURL() == wxString("about:blank") && url.Contains("flutter_web/index.html")) {
+        UpdateState();
+        return;
+    }
+#endif
     m_browser->LoadURL(url);
 
     UpdateState();
