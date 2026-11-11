@@ -493,7 +493,7 @@ static void collect_filament_slots_from_model_config(
             const int val = config.opt_int(key);
             if (val >= 1 && val <= num_filaments)
                 used_slots_0_based.insert(val - 1);
-        }
+            }
     }
 }
 
@@ -543,8 +543,8 @@ static void collect_used_filament_slots_on_plate(
             for (int extruder_id : model_volume->get_extruders()) {
                 if (extruder_id >= 1 && extruder_id <= num_filaments)
                     used_slots_0_based.insert(extruder_id - 1);
-            }
         }
+            }
     }
 
     // Plater working config — global features (always apply) + feature-specific
@@ -17808,8 +17808,7 @@ int Plater::new_project(bool skip_confirm, bool silent, const wxString& project_
 LoadType determine_load_type(std::string filename, std::string override_setting = "");
 
 // BBS: FIXME, missing resotre logic
-void Plater::load_project(wxString const& filename2,
-    wxString const& originfile)
+bool Plater::load_project(wxString const& filename2, wxString const& originfile)
 {
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << "filename is: " << filename2 << "and originfile is: " << originfile;
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__;
@@ -17828,7 +17827,7 @@ void Plater::load_project(wxString const& filename2,
     // BSS: save project, force close
     int result;
     if ((result = close_with_confirm(check)) == wxID_CANCEL) {
-        return;
+        return false;
     }
 
     // BBS
@@ -17836,7 +17835,7 @@ void Plater::load_project(wxString const& filename2,
         //some error cases happens
         //return directly
         BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << boost::format(": current loading other project, return directly");
-        return;
+        return false;
     }
     else
         m_loading_project = true;
@@ -17865,8 +17864,8 @@ void Plater::load_project(wxString const& filename2,
         switch (determine_load_type(filename.ToStdString())) {
             case LoadType::OpenProject: break; // Do nothing
             case LoadType::LoadGeometry:; strategy = LoadStrategy::LoadModel; break;
-            default: return; // User cancelled
-        }
+            default: return false; // User cancelled
+            }
     }
     bool load_restore = strategy & LoadStrategy::Restore;
 
@@ -17931,6 +17930,7 @@ void Plater::load_project(wxString const& filename2,
 
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << __LINE__ << " load project done";
     m_loading_project = false;
+    return !res.empty();
 }
 
 // BBS: save logic
@@ -18265,6 +18265,34 @@ void Plater::add_model(bool imperial_units, std::string fname)
     }
     else {
         paths.emplace_back(fname);
+    }
+
+    if (fname.empty()) {
+        const auto first_3mf = std::find_if(paths.begin(), paths.end(), [](const fs::path& path) {
+            return boost::algorithm::iends_with(path.filename().string(), ".3mf");
+        });
+        if (first_3mf != paths.end()) {
+            const size_t object_count_before = model().objects.size();
+            if (!open_3mf_file(*first_3mf))
+                return;
+
+            std::vector<fs::path> remaining_paths;
+            remaining_paths.reserve(paths.size() - 1);
+            remaining_paths.insert(remaining_paths.end(), paths.begin(), first_3mf);
+            remaining_paths.insert(remaining_paths.end(), first_3mf + 1, paths.end());
+            if (!remaining_paths.empty())
+                load_files(remaining_paths, LoadStrategy::LoadModel);
+
+            const bool loaded_objects = model().objects.size() > object_count_before;
+            if (loaded_objects && get_project_name() == _L("Untitled") && !paths.empty()) {
+                boost::filesystem::path full_path(paths[0].string());
+                p->set_project_name(from_u8(full_path.stem().string()));
+            }
+            if (loaded_objects)
+                wxGetApp().mainframe->update_title();
+
+            return;
+        }
     }
 
     std::string snapshot_label;
@@ -19683,7 +19711,7 @@ ProjectDropDialog::ProjectDropDialog(const std::string &filename)
                 wxDefaultPosition,
                 wxDefaultSize,
                 wxCAPTION | wxCLOSE_BOX)
-    , m_action(2)
+    , m_action(static_cast<int>(LoadType::OpenProject))
 {
     // def setting
     SetBackgroundColour(m_def_color);
@@ -20057,17 +20085,15 @@ bool Plater::open_3mf_file(const fs::path &file_path)
     switch (load_type) {
         case LoadType::OpenProject: {
             if (wxGetApp().can_load_project())
-                load_project(from_path(file_path), "<loadall>");
+                return load_project(from_path(file_path), "<loadall>");
             break;
         }
         case LoadType::LoadGeometry: {
             Plater::TakeSnapshot snapshot(this, "Import Object");
-            load_files({file_path}, LoadStrategy::LoadModel);
-            break;
+            return !load_files({file_path}, LoadStrategy::LoadModel).empty();
         }
         case LoadType::LoadConfig: {
-            load_files({file_path}, LoadStrategy::LoadConfig);
-            break;
+            return !load_files({file_path}, LoadStrategy::LoadConfig).empty();
         }
         case LoadType::Unknown: {
             assert(false);
@@ -20075,7 +20101,7 @@ bool Plater::open_3mf_file(const fs::path &file_path)
         }
     }
 
-    return true;
+    return false;
 }
 
 int Plater::get_3mf_file_count(std::vector<fs::path> paths)
